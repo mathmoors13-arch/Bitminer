@@ -14,6 +14,35 @@ import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+enum class LiveTransferStep {
+    SIGNING,      // "Cryptografisch Ondertekenen"
+    BROADCASTING, // "Uitzenden naar Mempool"
+    MINING,       // "Wachten op Blok Bevestiging"
+    CONFIRMED,    // "Succesvol Verwerkt"
+    FAILED        // "Mislukt"
+}
+
+data class LiveTransfer(
+    val step: LiveTransferStep,
+    val progress: Float,
+    val amountBtc: Double,
+    val amountEur: Double,
+    val fromAddress: String,
+    val toAddress: String,
+    val txHash: String,
+    val currentLog: String,
+    val isIncoming: Boolean
+)
+
+data class MempoolTx(
+    val id: String,
+    val from: String,
+    val to: String,
+    val amountBtc: Double,
+    val timeString: String,
+    val satPerVb: Int
+)
+
 class BitVaultViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── REAL-TIME BITCOIN PRICE TICKER PROPERTIES ──
@@ -34,6 +63,17 @@ class BitVaultViewModel(application: Application) : AndroidViewModel(application
 
     private val _btcPriceDirection = MutableStateFlow("up")
     val btcPriceDirection: StateFlow<String> = _btcPriceDirection.asStateFlow()
+
+    // Live Transfer State
+    private val _activeLiveTransfer = MutableStateFlow<LiveTransfer?>(null)
+    val activeLiveTransfer: StateFlow<LiveTransfer?> = _activeLiveTransfer.asStateFlow()
+
+    private val _globalMempoolTxs = MutableStateFlow<List<MempoolTx>>(emptyList())
+    val globalMempoolTxs: StateFlow<List<MempoolTx>> = _globalMempoolTxs.asStateFlow()
+
+    fun clearActiveTransfer() {
+        _activeLiveTransfer.value = null
+    }
 
     // OkHttp Client local reuse instance
     private val httpClient = OkHttpClient.Builder()
@@ -249,6 +289,49 @@ class BitVaultViewModel(application: Application) : AndroidViewModel(application
                 _isTickerLoading.value = false
                 firstRun = false
                 delay(30_000) // 30 seconds wait
+            }
+        }
+
+        // Live Global Mempool stream simulator
+        viewModelScope.launch {
+            val initialList = mutableListOf<MempoolTx>()
+            val addresses = listOf(
+                "bc1q9v89p03lsdmslf8390sdm9823smdlwks",
+                "bc1q7ywp3g7l9slw5t359sm44766gslws2lqsw2lq9",
+                "bc1q84nd90s8djs8df8h9d9f8shfdjshfsfsf",
+                "bc1qw0sd9f8sfhsdjfsf0sfd0sf0dsfsfsf",
+                "bc1qpy90sa9sfhsdjfs0fsdfsd0fdsfsfsf"
+            )
+            for (i in 1..4) {
+                initialList.add(
+                    MempoolTx(
+                        id = "tx_" + Random.nextInt(100000, 999999),
+                        from = addresses.random().take(12) + "...",
+                        to = addresses.random().take(12) + "...",
+                        amountBtc = Random.nextDouble(0.001, 0.25),
+                        timeString = "Zojuist",
+                        satPerVb = Random.nextInt(8, 45)
+                    )
+                )
+            }
+            _globalMempoolTxs.value = initialList
+
+            while (true) {
+                delay(Random.nextLong(6000, 10000))
+                val currentList = _globalMempoolTxs.value.toMutableList()
+                if (currentList.size >= 5) {
+                    currentList.removeAt(currentList.size - 1)
+                }
+                val newTx = MempoolTx(
+                    id = "tx_" + Random.nextInt(100000, 999999),
+                    from = addresses.random().take(12) + "...",
+                    to = addresses.random().take(12) + "...",
+                    amountBtc = Random.nextDouble(0.0005, 0.15),
+                    timeString = "Zojuist",
+                    satPerVb = Random.nextInt(10, 50)
+                )
+                currentList.add(0, newTx)
+                _globalMempoolTxs.value = currentList
             }
         }
     }
@@ -512,27 +595,79 @@ class BitVaultViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            // Perform secure cryptographic signing broadcast mockup delay
-            _toastMessage.emit("Transactie ondertekenen met private key...")
-            delay(1500)
-            _toastMessage.emit("Zenden naar decentralized netwerk...")
+            val currentRate = if (_bitcoinPriceEur.value > 1000) _bitcoinPriceEur.value else 70000.0
+            val amountEur = amountBtc * currentRate
+            val txHash = "f1a8" + Random.nextInt(100000, 999999) + "bc903bd81a3d92040e" + Random.nextInt(100, 999) + "da3b76a"
+
+            // STEP 1: SIGNING
+            _activeLiveTransfer.value = LiveTransfer(
+                step = LiveTransferStep.SIGNING,
+                progress = 0.15f,
+                amountBtc = amountBtc,
+                amountEur = amountEur,
+                fromAddress = fromAddress,
+                toAddress = destination,
+                txHash = txHash,
+                currentLog = "Cryptografische handtekening genereren met ECDSA secp256k1...",
+                isIncoming = false
+            )
+            delay(1200)
+
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                progress = 0.35f,
+                currentLog = "Transactie payload ondertekenen met private sleutel van ${sourceWallet.label}..."
+            )
             delay(1000)
 
+            // STEP 2: BROADCASTING
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                step = LiveTransferStep.BROADCASTING,
+                progress = 0.5f,
+                currentLog = "Uitzenden naar decentraal P2P netwerk. Verbinding maken met peers..."
+            )
+            delay(1200)
+
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                progress = 0.65f,
+                currentLog = "Verzonden naar 12 actieve Bitcoin nodes. Toevoegen aan Mempool..."
+            )
+            delay(1000)
+
+            // STEP 3: MINING
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                step = LiveTransferStep.MINING,
+                progress = 0.8f,
+                currentLog = "Wachten op blokbevestiging door miners. Prioriteit: medium..."
+            )
+            delay(1500)
+
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                progress = 0.9f,
+                currentLog = "Toegevoegd aan kandidaat-blok. Bezig met hashrate verificatie..."
+            )
+            delay(1200)
+
+            // Deduct balance and update DB
             val nextBalance = sourceWallet.balanceBtc - amountBtc
             repository.updateWalletBalance(fromAddress, nextBalance)
 
             // Log corresponding transaction histories
-            val currentRate = if (_bitcoinPriceEur.value > 1000) _bitcoinPriceEur.value else 70000.0
             repository.addTransaction(
                 TransactionLog(
                     title = "BTC verzonden",
                     sub = "Naar ${destination.take(12)}...${destination.takeLast(4)}",
-                    amount = -(amountBtc * currentRate),
+                    amount = -amountEur,
                     type = "SEND"
                 )
             )
 
-            _toastMessage.emit("Succesvol €${String.format("%.2f", amountBtc * currentRate)} overgeschreven via Bitcoin Blockchain! ✓")
+            // STEP 4: CONFIRMED
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                step = LiveTransferStep.CONFIRMED,
+                progress = 1.0f,
+                currentLog = "Overdracht succesvol bevestigd! Opgenomen in Bitcoin Blockchain."
+            )
+            _toastMessage.emit("Transactie €${String.format("%.2f", amountEur)} succesvol verzonden via Live Transfer! ✓")
         }
     }
 
@@ -550,25 +685,63 @@ class BitVaultViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            _toastMessage.emit("Inkomende transactie detecteren...")
-            delay(1000)
-            _toastMessage.emit("Blokbevestigingen controleren...")
-            delay(1000)
+            val currentRate = if (_bitcoinPriceEur.value > 1000) _bitcoinPriceEur.value else 70000.0
+            val amountEur = amountBtc * currentRate
+            val txHash = "f1a8" + Random.nextInt(100000, 999999) + "bc903bd81a3d92040e" + Random.nextInt(100, 999) + "da3b76a"
+
+            // STEP 1: SCANNING / DETECTION
+            _activeLiveTransfer.value = LiveTransfer(
+                step = LiveTransferStep.BROADCASTING,
+                progress = 0.2f,
+                amountBtc = amountBtc,
+                amountEur = amountEur,
+                fromAddress = senderAddress,
+                toAddress = toAddress,
+                txHash = txHash,
+                currentLog = "Scannen van mempool naar inkomende transactie voor $toAddress...",
+                isIncoming = true
+            )
+            delay(1200)
+
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                progress = 0.5f,
+                currentLog = "Transactie gedetecteerd van ${senderAddress.take(12)}... met onbevestigd saldo van $amountBtc BTC..."
+            )
+            delay(1200)
+
+            // STEP 2: MINING
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                step = LiveTransferStep.MINING,
+                progress = 0.8f,
+                currentLog = "Wachten op netwerk blockbevestigingen. Bezig met handtekening validatie..."
+            )
+            delay(1500)
+
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                progress = 0.9f,
+                currentLog = "Blok geverifieerd door mijnbouw pool. Bezig met bijschrijven..."
+            )
+            delay(1200)
 
             val nextBalance = targetWallet.balanceBtc + amountBtc
             repository.updateWalletBalance(toAddress, nextBalance)
 
-            val currentRate = if (_bitcoinPriceEur.value > 1000) _bitcoinPriceEur.value else 70000.0
             repository.addTransaction(
                 TransactionLog(
                     title = "BTC ontvangen",
                     sub = "Van ${senderAddress.take(12)}...${senderAddress.takeLast(4)}",
-                    amount = amountBtc * currentRate,
+                    amount = amountEur,
                     type = "RECEIVE"
                 )
             )
 
-            _toastMessage.emit("Succesvol €${String.format("%.2f", amountBtc * currentRate)} bijgeschreven op wallet ${targetWallet.label}! ✓")
+            // STEP 4: CONFIRMED
+            _activeLiveTransfer.value = _activeLiveTransfer.value?.copy(
+                step = LiveTransferStep.CONFIRMED,
+                progress = 1.0f,
+                currentLog = "Succesvol overgedragen! Saldo bijgeschreven op wallet ${targetWallet.label}."
+            )
+            _toastMessage.emit("Transactie €${String.format("%.2f", amountEur)} succesvol ontvangen via Live Transfer! ✓")
         }
     }
 

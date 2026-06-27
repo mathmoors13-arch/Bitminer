@@ -35,7 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.*
 import com.example.ui.theme.*
-import com.example.viewmodel.BitVaultViewModel
+import com.example.viewmodel.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -83,6 +83,8 @@ fun MainAppScreen(
     val allReferrals by viewModel.allReferrals.collectAsStateWithLifecycle()
     val allWallets by viewModel.allWallets.collectAsStateWithLifecycle()
     val appConfig by viewModel.appConfig.collectAsStateWithLifecycle()
+    val activeLiveTransfer by viewModel.activeLiveTransfer.collectAsStateWithLifecycle()
+    val globalMempoolTxs by viewModel.globalMempoolTxs.collectAsStateWithLifecycle()
 
     // Live telemetries
     val hashrate by viewModel.currentHashrate.collectAsStateWithLifecycle()
@@ -408,7 +410,8 @@ fun MainAppScreen(
                             onSendBitcoin = { from, to, amount -> viewModel.sendBitcoin(from, to, amount) },
                             onReceiveBitcoin = { to, amount -> viewModel.receiveBitcoin(to, amount) },
                             clipboardManager = clipboardManager,
-                            btcPriceEur = btcPriceEur
+                            btcPriceEur = btcPriceEur,
+                            mempoolTxs = globalMempoolTxs
                         )
                         "plans" -> MembershipTab(
                             userProfile = userProfile,
@@ -461,6 +464,14 @@ fun MainAppScreen(
                 }
 
                 // ── DIALOGS AND BOTTOM SHEETS REPLICAS ──
+
+                activeLiveTransfer?.let { transfer ->
+                    LiveTransferOverlay(
+                        transfer = transfer,
+                        onDismiss = { viewModel.clearActiveTransfer() },
+                        clipboardManager = clipboardManager
+                    )
+                }
 
                 // Wallet Config Sheet Modal
                 if (showWalletInputSettings) {
@@ -1196,7 +1207,8 @@ fun WalletTab(
     onSendBitcoin: (String, String, Double) -> Unit,
     onReceiveBitcoin: (String, Double) -> Unit,
     clipboardManager: androidx.compose.ui.platform.ClipboardManager,
-    btcPriceEur: Double
+    btcPriceEur: Double,
+    mempoolTxs: List<MempoolTx> = emptyList()
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var walletLabel by remember { mutableStateOf("") }
@@ -1399,6 +1411,122 @@ fun WalletTab(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text("12-Woorden Seed:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SleekPrimary)
                                 Text(wallet.seedWords, fontSize = 11.sp, color = SleekTertiary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ── LIVE MEMPOOL MONITOR CARD ──
+        Card(
+            colors = CardDefaults.cardColors(containerColor = SleekPrimary),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("📡", fontSize = 14.sp)
+                        Text(
+                            text = "Live Mempool Monitor",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp,
+                            color = Color.White
+                        )
+                    }
+
+                    // Flashing LIVE badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Red.copy(alpha = 0.2f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "● LIVE",
+                            color = Color.Red,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Wereldwijde on-chain overdrachten in real-time gedetecteerd door BitVault P2P nodes.",
+                    color = Color.LightGray,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                )
+
+                if (mempoolTxs.isEmpty()) {
+                    Text(
+                        text = "Verbinding maken met mempool nodes...",
+                        color = Color.Gray,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
+                    mempoolTxs.forEach { tx ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "${tx.from} ➔ ${tx.to}",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Tarief: ${tx.satPerVb} sat/vB",
+                                        color = Color.LightGray,
+                                        fontSize = 9.sp
+                                    )
+                                    Text(
+                                        text = "ID: ${tx.id}",
+                                        color = Color.Gray,
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                            
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "${String.format("%.4f", tx.amountBtc)} BTC",
+                                    color = Color.Yellow,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "≈ €${String.format("%.2f", tx.amountBtc * btcPriceEur)}",
+                                    color = Color.LightGray,
+                                    fontSize = 9.sp
+                                )
                             }
                         }
                     }
@@ -2513,4 +2641,218 @@ fun AuthScreen(
             }
         }
     }
+}
+
+@Composable
+fun LiveTransferOverlay(
+    transfer: LiveTransfer,
+    onDismiss: () -> Unit,
+    clipboardManager: androidx.compose.ui.platform.ClipboardManager
+) {
+    AlertDialog(
+        onDismissRequest = {
+            if (transfer.step == LiveTransferStep.CONFIRMED) onDismiss()
+        },
+        containerColor = SleekWhite,
+        shape = RoundedCornerShape(28.dp),
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (transfer.step == LiveTransferStep.CONFIRMED) SuccessGreen else SleekPrimary,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = if (transfer.step == LiveTransferStep.CONFIRMED) "Ok, voltooid! ✓" else "Verder in achtergrond ↗",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Live Overdracht Hub",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 18.sp,
+                    color = SleekPrimary
+                )
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (transfer.step == LiveTransferStep.CONFIRMED) SuccessGreen.copy(alpha = 0.15f) else SleekSecondary.copy(alpha = 0.15f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (transfer.step == LiveTransferStep.CONFIRMED) SuccessGreen else SleekSecondary)
+                    )
+                    Text(
+                        text = if (transfer.step == LiveTransferStep.CONFIRMED) "VOLTOOID" else "LIVE P2P",
+                        color = if (transfer.step == LiveTransferStep.CONFIRMED) SuccessGreen else SleekSecondary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = if (transfer.isIncoming) "Inkomende Bitcoin overdracht gedetecteerd op blockchain." else "Uitgaande Bitcoin overdracht naar blockchain mempool.",
+                    fontSize = 11.sp,
+                    color = SleekTextMuted,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SleekGrayLight),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (transfer.isIncoming) "+ ${String.format("%.6f", transfer.amountBtc)} BTC" else "- ${String.format("%.6f", transfer.amountBtc)} BTC",
+                            color = if (transfer.isIncoming) SuccessGreen else ErrorRed,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "≈ € ${String.format("%.2f", transfer.amountEur)} EUR",
+                            color = SleekPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SleekPrimary),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "> " + transfer.currentLog,
+                            color = Color.Green,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            minLines = 2
+                        )
+                    }
+                }
+
+                LinearProgressIndicator(
+                    progress = transfer.progress,
+                    color = if (transfer.step == LiveTransferStep.CONFIRMED) SuccessGreen else SleekSecondary,
+                    trackColor = SleekBorder,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                val stages = listOf(
+                    Triple("Ondertekening (ECDSA)", "Sleutelverificatie", transfer.step.ordinal >= LiveTransferStep.SIGNING.ordinal),
+                    Triple("Uitzending (Mempool)", "Decentraal netwerk", transfer.step.ordinal >= LiveTransferStep.BROADCASTING.ordinal),
+                    Triple("Mijnbouw & Bevestiging", "Wachten op blok", transfer.step.ordinal >= LiveTransferStep.MINING.ordinal),
+                    Triple("Blockchain Ledger", "Toegevoegd aan keten", transfer.step.ordinal >= LiveTransferStep.CONFIRMED.ordinal)
+                )
+
+                stages.forEachIndexed { i, (title, sub, isDone) ->
+                    val isActive = if (transfer.step == LiveTransferStep.CONFIRMED) {
+                        i == 3
+                    } else {
+                        transfer.step.ordinal == i
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isDone && !isActive -> SuccessGreen
+                                        isActive -> SleekSecondary
+                                        else -> SleekBorder
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isDone && !isActive) {
+                                Text("✓", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            } else if (isActive) {
+                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.White))
+                            }
+                        }
+                        
+                        Column(modifier = Modifier.padding(start = 10.dp)) {
+                            Text(
+                                text = title,
+                                fontSize = 11.sp,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isActive) SleekPrimary else if (isDone) SleekTextDark else SleekTextMuted
+                            )
+                            Text(
+                                text = sub,
+                                fontSize = 9.sp,
+                                color = SleekTextMuted
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SleekGrayLight)
+                        .clickable { clipboardManager.setText(AnnotatedString(transfer.txHash)) }
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Transactie-ID (TxHash)", fontSize = 8.sp, color = SleekTextMuted)
+                        Text(
+                            text = transfer.txHash.take(18) + "..." + transfer.txHash.takeLast(6),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            color = SleekPrimary
+                        )
+                    }
+                    Text("Kopieer 📋", fontSize = 9.sp, color = SleekSecondary, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    )
 }
